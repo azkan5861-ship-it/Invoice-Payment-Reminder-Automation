@@ -1,0 +1,267 @@
+{
+  "name": "Invoice Payment Reminder Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "node_schedule_trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "Invoices"
+        },
+        "options": {}
+      },
+      "id": "node_load_invoices",
+      "name": "Load Invoices",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        150,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const today = new Date();\nconst output = [];\n\nfor (const item of $input.all()) {\n  const status = item.json.status;\n  const dueDate = new Date(item.json.due_date);\n  const daysOverdue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));\n\n  if (status === 'Unpaid' && daysOverdue >= 1) {\n    let tone = 'friendly reminder';\n    if (daysOverdue >= 4 && daysOverdue <= 14) tone = 'firm follow-up';\n    if (daysOverdue >= 15) tone = 'final notice, serious but professional tone';\n\n    output.push({\n      json: { ...item.json, days_overdue: daysOverdue, tone: tone }\n    });\n  }\n}\n\nreturn output;"
+      },
+      "id": "node_filter_overdue",
+      "name": "Filter Overdue Invoices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=JSON.stringify({\n  model: \"openai/gpt-oss-120b\",\n  messages: [\n    {\n      role: \"system\",\n      content: \"You are a professional accounts assistant. Write a short payment reminder email to a client. Match this tone exactly: \" + $json.tone + \". Stay polite and professional even in the final notice. Mention the invoice number, amount, and days overdue naturally. Keep it under 80 words. End by asking them to pay soon or reply if already paid.\"\n    },\n    {\n      role: \"user\",\n      content: \"Client: \" + $json.client_name + \", Invoice: \" + $json.invoice_id + \", Amount: \" + $json.amount + \", Days overdue: \" + $json.days_overdue\n    }\n  ],\n  temperature: 0.5\n})",
+        "options": {}
+      },
+      "id": "node_ai_reminder",
+      "name": "AI Reminder Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign_message",
+              "name": "message",
+              "type": "string",
+              "value": "={{ $json.choices[0].message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node_parse_reply",
+      "name": "Parse AI Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.client_email }}",
+        "subject": "=Payment Reminder — Invoice #{{ $json.invoice_id }}",
+        "message": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "node_send_email",
+      "name": "Send Reminder Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1150,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "Invoices"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "invoice_id"
+          ],
+          "value": {
+            "invoice_id": "={{ $json.invoice_id }}",
+            "last_reminder_sent": "={{ $now }}",
+            "reminder_count": "={{ Number($json.reminder_count) + 1 }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node_update_sheet",
+      "name": "Update Invoice Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1400,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Invoices": {
+      "main": [
+        [
+          {
+            "node": "Filter Overdue Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Overdue Invoices": {
+      "main": [
+        [
+          {
+            "node": "AI Reminder Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Reminder Message": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder Email": {
+      "main": [
+        [
+          {
+            "node": "Update Invoice Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

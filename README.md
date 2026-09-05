@@ -28,10 +28,6 @@ An n8n workflow that automatically finds overdue invoices, writes an AI-generate
 
 Manually tracking which invoices are overdue and writing follow-up emails is repetitive and easy to forget. This workflow removes that manual step entirely — invoices are checked daily, and clients get a professionally-worded reminder automatically, with the tone escalating the longer a payment is overdue.
 
-## Demo
-
-📹 *[Add your 60-second demo video link here]*
-
 ## Setup
 
 1. Import `invoice_payment_reminder_workflow.json` into your n8n instance.
